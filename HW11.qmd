@@ -1,0 +1,754 @@
+---
+title: "Assignment 11"
+subtitle: "Lusi (Ruth) Wang"
+format:
+    pdf: default
+---
+Note: ChatGPT and GitHub Copilot were used for references in this homework.
+```{r}
+#| warning: false
+#| message: false
+
+library(haven)
+library(emmeans)
+library(readr)
+library(labelled)
+library(rstanarm)
+library(BayesFactor)
+library(easystats)
+library(tidyverse)
+library(BFpack)
+library(dplyr)
+library(tidyr)
+library(knitr)
+library(ggplot2)
+library(ggdist)
+library(broom)
+library(scales)
+library(pwr)
+library(patchwork)
+library(lme4)
+library(lmerTest)
+library(pbkrtest)
+library(modelr)
+library(brms)
+```
+
+\newpage
+# Question 1
+
+## 1.1 Count Table
+First, import the data and generate a well-formatted table that reports the count and the percentage of winners that were (or were not) from the US, separately for males and females. All percentages should add up to 100%. For this and following questions, please always round your numbers to 2 decimal places. 
+```{r}
+# Import the data from the URL
+url <- "https://raw.githubusercontent.com/felixthoemmes/hwdatasets/master/oscarwinners.csv"
+oscar_data <- read.csv(url)
+
+# Convert Gender and US to factors
+oscar_data$Gender <- as.factor(oscar_data$Gender)
+oscar_data$US <- as.factor(oscar_data$US)
+
+# Generate a table for counts and percentages
+count_output <- oscar_data |>
+  group_by(Gender, US) |>
+  summarise(Count = n(), .groups = 'drop') |>
+  mutate(Percentage = sprintf("%.2f", Count / sum(Count) * 100)) |>
+  tibble()
+
+count_table <- kable(count_output, 
+      caption = "Oscar Winners by Gender and US Nationality")
+
+count_table
+```
+
+## 1.2 Statistics Summary Table
+Compute and report in one table, the sample size (N), mean (M) and the standard deviation (SD) of 1. the total sample, 2. All US males, 3. All US females, 4. All non-US males, 5. All non-US females.
+```{r}
+## 1.2 Statistics Summary Table
+#  The total sample
+total_stats <- oscar_data |>
+  summarise(
+    Group = "Total Sample",
+    N = n(), 
+    M = mean(Age, na.rm = TRUE), 
+    SD = sd(Age, na.rm = TRUE)
+  ) |>
+  tibble()
+
+# All US males
+us_males_stats <- oscar_data |>
+  filter(US == "1" & Gender == "Male") |>
+  summarise(
+    Group = "All US Males",
+    N = n(), 
+    M = mean(Age, na.rm = TRUE), 
+    SD = sd(Age, na.rm = TRUE)
+  ) |>
+  tibble()
+
+# All US females
+us_females_stats <- oscar_data |>
+  filter(US == "1" & Gender == "Female") |>
+  summarise(
+    Group = "All US Females",
+    N = n(), 
+    M = mean(Age, na.rm = TRUE), 
+    SD = sd(Age, na.rm = TRUE)
+  ) |>
+  tibble()
+
+# All non-US males
+non_us_males_stats <- oscar_data |>
+  filter(US == "0" & Gender == "Male") |>
+  summarise(
+    Group = "All non-US Males",
+    N = n(), 
+    M = mean(Age, na.rm = TRUE), 
+    SD = sd(Age, na.rm = TRUE)
+  ) |>
+  tibble()
+
+# All non-US females
+non_us_females_stats <- oscar_data |>
+  filter(US == "0" & Gender == "Female") |>
+  summarise(
+    Group = "All non-US Females",
+    N = n(), 
+    M = mean(Age, na.rm = TRUE), 
+    SD = sd(Age, na.rm = TRUE)
+  ) |>
+  tibble()
+
+combined_stats <- bind_rows(total_stats, us_males_stats, us_females_stats, 
+                            non_us_males_stats, non_us_females_stats)
+
+combined_table <- kable(combined_stats,
+                        caption = "Descriptive Statistics by Groups",
+                        digits = 2)
+
+combined_table
+```
+
+## 1.3 Kernel Desntiy Plot 
+In addition to the descriptive statistics above, also generate an overlaid kernel density estimate of age split by males and females. Display this graph, and comment briefly on differences in central tendency, and variability between the two genders. 
+```{r}
+ # Generate an overlaid kernel density plot for age split by gender
+age_density_plot <- ggplot(oscar_data, aes(x = Age, fill = Gender)) +
+  geom_density(alpha = 0.5) +
+  labs(title = "Kernel Density Estimate of Age by Gender",
+       x = "Age",
+       y = "Density",
+       fill = "Gender") +
+  theme_minimal()
+
+# Display the plot
+age_density_plot
+```
+**Interpretation**: The kernel density plots show that female Oscar winners commonly peak around age 30, while for males, it's around 40, indicating a 10-year difference in the typical winning age. Both genders exhibit a secondary peak near age 60. The variability in age distribution appears similar for both genders, highlighting a gender-based age discrepancy in Oscar wins.
+
+## 1.4 Line Plot
+As an alternative display, create a lineplot, which has “Year of Award”” on the X-axis, age of the winner on the Y-axis, and has two lines, one for males and one for females. Note that there are a couple of years in which more than two awards were given.
+```{r}
+age_line_plot <- ggplot(oscar_data, aes(x = Year, y = Age, group = Gender, color = Gender)) +
+  geom_line() +
+  labs(title = "Age of Oscar Winners Over Time by Gender",
+       x = "Year of Award",
+       y = "Age of Winner",
+       color = "Gender") +
+  theme_minimal()
+
+age_line_plot
+```
+\newpage
+# Question 2
+Perform a frequentist hypothesis test to determine whether the mean age differs between the two genders. Along with this test, report the actual mean difference along with a 95% confidence interval. Provide a short write-up for each analysis result. Expected length is about 1-3 sentences.
+```{r}
+lm1 <- lm(Age ~ Gender, data = oscar_data)
+
+em1<- emmeans(lm1, ~ Gender, contr = "pairwise")
+
+em1_output <- summary(em1$contrasts, infer = T)
+
+freq_q2 <- em1_output |>
+  mutate(p.value = pvalue(p.value)) |>
+  kable(caption = "Frequentist Mean Age Difference Between Genders",
+        digits = 2)
+
+freq_q2
+```
+**Interpretation**:  The statistical analysis reveals a significant difference in mean ages between male and female Oscar winners (p < 0.001), leading us to reject the null hypothesis of no age difference between genders. The estimated mean age difference is -7.73 years (95% CI: -10.78 to -4.69), indicating that female winners are, on average, younger than their male counterparts by approximately 7.73 years. This negative value underscores the trend of females receiving Oscars at a younger age compared to males.
+
+\newpage
+# Question 3
+## 3.1 Bayes Factor
+Redo the previous analysis using Bayesian statistics. Report a Bayes Factor (using de-fault priors) to answer the question whether there is a “main effect” for gender. 
+```{r}
+set.seed(5750)
+
+bf1 = anovaBF(Age ~ Gender, data = oscar_data)
+bf1
+```
+**Interpretation**: The Bayes Factor of 11204.75 provides very strong evidence favoring the model with `Gender` over the null model (intercept only). This Bayes Factor indicates that gender strongly influences the age at which individuals win Oscars, underscoring a notable gender effect in this context.
+
+## 3.2 Bayesian Estimate
+Then report (Bayesian) point estimates and 95% credible intervals for all pairwise mean differences between groups. For the Bayesian model use a prior on the intercept that is normally distributed, centered on 35 (because age is far away from zero), with a standard deviation of 3 on a standardized scale. For other coefficients (here the group mean differences) use a prior centered around zero (indicating that there is no prior information whether the treatment is positive or negative), with a standard deviation of 3. Provide a short write-up for each analysis result. Expected length is about 1-3 sentences.
+```{r cache=TRUE, results="hide", message=FALSE, warnings=FALSE}
+set.seed(5750)
+blm1 <- stan_glm(Age ~ Gender, data = oscar_data,
+                 prior_intercept = normal(35, 3, autoscale = TRUE),
+                 prior = normal(0, 3, autoscale = TRUE),
+                 iter = 10000,
+                 diagnostic_file = file.path(tempdir(), "df.csv"))
+
+bem1 <- emmeans(blm1, ~ Gender, contr = "pairwise")
+
+blm1_post <- describe_posterior(bem1$contrasts,
+                                ci = .95,
+                                test = c("bayesfactor"),
+                                bf_prior = blm1)
+
+blm1_post$BF <- exp(blm1_post$log_BF)
+
+bayes_q3 <- blm1_post |>
+  tibble() |>
+  kable(caption = "Bayesian Mean Age Difference Between Genders",
+        digits = 2)
+```
+```{r}
+bayes_q3
+```
+**Interpretation**: The Bayesian analysis show strong evidence in favor of a major difference in the mean age of Oscar winners between genders, with female winners being, on average, 7.72 years younger than male winners. Such a difference is further supported by the 95% credible interval (-10.73, -4.61) which does not include 0. 
+
+\newpage
+# Question 4
+Now estimate a model with two independent variables. Predict age of the winner from gender, and from whether the person was from the US or not. Include the interaction between these two independent variables in your model. 
+
+## 4.1 Main Effects & 4.2 Interaction Effect
+Use emmeans to estimate main effects, and report F and p-values for main effects of gender, and nationality. Use sample-size weighted marginal means, when computing main effects. That means that you have to use the weights=“proportional” option. Then report an F and p-value for the interaction effect.
+```{r}
+lm2 <- lm(Age ~ Gender * US, data = oscar_data)
+
+# Estimate main effects using emmeans with sample-size weighting
+em2 <- emmeans(lm2, specs = c("Gender", "US"), weights = "proportional")
+
+# Joint tests of main effects
+em2_joint <- joint_tests(em2)
+
+em2_table <- em2_joint |>
+  tibble() |>
+  mutate(p.value = pvalue(p.value)) |>
+  kable(caption = "Frequentist Main Effects and Interaction Effect",
+        digits = 2)
+
+em2_table
+```
+**Interpretation**: Gender significantly influences the age of Oscar winners, with a substantial main effect (f-ratio = 23.99, p-value < 0.001). In contrast, nationality (f-ratio is almost 0, p-value = 0.978) and the interaction between gender and nationality (f-ration = 0.52, p-value = 0.472) do not appear to significantly impact the age of Oscar winners. This suggests that while gender is an important factor, the effect of gender on age is consistent across US and non-US winners.
+
+## 4.3 Differences in Marginal Means
+Use emmeans to report the differences in marginal means of gender, and the differences in marginal means of nationality, along with frequentist inferential statistics (p-value and 95% CI). 
+
+### 4.3.1 Gender
+Estimate marginal means for Gender with pairwise comparisons
+```{r}
+em2_gender <- emmeans(lm2, specs = pairwise ~ Gender, adjust = "tukey")
+em2_gender_contrast <- summary(em2_gender$contrasts, infer = c(TRUE, TRUE))
+
+em2_gender_contrast_table <- em2_gender_contrast |>
+  tibble() |>
+  mutate(p.value = pvalue(p.value)) |>
+  kable(caption = "Frequentist Gender Contrast",
+        digits = 2)
+
+em2_gender_contrast_table
+```
+**Interpretation**: The analysis reveals a statistically significant (p<0.001) difference in the mean age of Oscar winners between genders, with female winners being 8.19 years younger than male winners. The 95% confidence interval of (-11.49, -4.89)also highlights a clear gender-based disparity in the age of Oscar award recipients.
+
+### 4.3.2 Nationality
+Estimate marginal means for US with pairwise comparisons
+```{r}
+em2_us <- emmeans(lm2, specs = pairwise ~ US, adjust = "tukey")
+em2_us_contrast <- summary(em2_us$contrasts, infer = c(TRUE, TRUE))
+
+em2_us_contrast_table <- em2_us_contrast |>
+  tibble() |>
+  mutate(p.value = pvalue(p.value)) |>
+  kable(caption = "Frequentist Nationality Contrast",
+        digits = 2)
+
+em2_us_contrast_table
+```
+**Interpretation**: The analysis indicates no significant difference (p=0.978) in the mean age of Oscar winners based on nationality (US vs. non-US). The nearly 0 estimated difference and the 95% confidence interval (-3.35, 3.25), which includes zero, highlight that nationality does not have a statistically significant impact on the age at which individuals win Oscars.
+
+## 4.4 Conditional Effects
+### 4.4.1 Gender Effect for US 
+Use emmeans to report the conditional effect for US actors. Include point estimates and frequentist inferential statistics (p-value and 95% CI).
+```{r}
+em2_cond_US <- emmeans(lm2, specs = ~ Gender * US, 
+                       contr = list("Female - Male (US)" = c(0, 0, 1, -1)))$contrasts
+
+em2_cond_US_sum <- summary(em2_cond_US, infer = c(TRUE, TRUE))
+
+em2_cond_US_table <- em2_cond_US_sum |>
+  tibble() |>
+  mutate(p.value = pvalue(p.value)) |>
+  kable(caption = "Frequentist Gender Effect for US Winners", digits = 2)
+
+em2_cond_US_table
+```
+**Interpretation**: The analysis reveals a statistically significant (p-value < 0.001) gender-based age disparity among Oscar winners in the US, with female winners being, on average, 6.98 years younger than male winners. The 95% confidence interval ranging from -10.66 to -3.3 years further underscores this clear gender effect on the age of Oscar award recipients in the US. 
+
+### 4.4.2 Gender Effect for Non-US 
+Use emmeans to report the conditional effect for non-US actors. Include point estimates and frequentist inferential statistics (p-value and 95% CI).
+```{r}
+em2_cond_nonUS <- emmeans(lm2, specs = ~ Gender * US, 
+                  contr = list("Female - Male (non-US)" = c(1, -1, 0, 0)))$contrasts
+
+em2_cond_nonUS_sum <- summary(em2_cond_nonUS, infer = c(TRUE, TRUE))
+
+em2_cond_nonUS_table <- em2_cond_nonUS_sum |>
+  tibble() |>
+  mutate(p.value = pvalue(p.value)) |>
+  kable(caption = "Frequentist Gender Effect for Non-US Winners", digits = 2)
+
+em2_cond_nonUS_table
+```
+**Interpretation**: The analysis indicates a statistically significant (p-value < 0.001) gender-based age disparity among non-US Oscar winners, with female winners being, on average, 9.39 years younger than their male counterparts. The 95% confidence interval, extending from -14.87 to -3.92 years, reinforces the significance of this gender effect on the age of Oscar award recipients from outside the US. 
+
+## 4.5 Difference in Conditional Effects
+Finally, report the numerical value of the difference in conditional effects, along with frequentist inferential statistics (p-value and 95% CI).
+```{r}
+em2_cond_diff <- emmeans(lm2, specs = ~ Gender * US, 
+                         contr = list("US - non-US" = c(-1, 1, 1, -1)))$contrasts
+
+em2_cond_diff_sum <- summary(em2_cond_diff, infer = c(TRUE, TRUE))
+
+em2_cond_diff_table <- em2_cond_diff_sum|>
+  tibble() |>
+  mutate(p.value = pvalue(p.value)) |>
+  kable(caption = "Frequentist Difference in Gender Effect by Nationality", 
+        digits = 2)
+
+em2_cond_diff_table
+```
+**Interpretation**: The analysis suggests a slight, but not statistically significant (p-value = 0.472), difference in the gender-based age disparity between US and non-US Oscar winners. The estimated difference (2.41) and the confidence interval (-4.19, 9.01) which includes zero, show that the gender effect on the age of Oscar winners does not differ substantially between these nationalities.
+
+\newpage
+# Question 5
+## 5.1 Bayes Factors
+Redo the previous analysis from question 4 using Bayesian statistics. First report the following Bayes Factors.
+
+### 5.1.1 Null Model vs...
+```{r}
+set.seed(5750)
+bf2 <- anovaBF(Age ~ Gender * US, data = oscar_data)
+bf2
+```
+
+**A BF comparing a null model with a model that only includes gender**
+
+* Answer: `[1] Gender: 11204.75` indicates very strong evidence in favor of the model that includes `Gender` over the null model (intercept only).
+
+**A BF comparing a null model with a model that only includes nationality**
+
+* Answer: `[2] US: 0.1734863` (BF < 1, reciprocal is about 5.76) indicates that the null model is substantially more supported by the data than the model with `US` (nationality).
+
+**A BF comparing a null model with a model that includes both gender and nationality but no interaction**
+
+* Answer: `[3] Gender + US: 1955.063` indicates strong evidence for a model including both Gender and US, but without the interaction, compared to the null model.
+
+**A BF comparing a null model with a model that includes gender, nationality, and the interaction**
+
+* Answer: `[4] Gender + US + Gender:US: 547.5773` indicates strong evidence in favor of the full model (including the interaction) compared to the null model.
+
+### 5.1.2 Full Model vs. Main Effects Model
+
+Report a BF comparing a model with all terms and a model that only includes main effects 
+```{r}
+set.seed(5750)
+bf3 <- anovaBF(Age ~ Gender * US, data = oscar_data, whichModels = "top")
+bf3
+```
+**Answer**: `[1] Omit Gender:US: 3.880496` indicates moderate evidence in favor of the simpler alternaive model (main effects, `Gender + US`) over the full model (`Gender + US + Gender:US`). 
+
+## 5.2 Bayesian Estimate
+Then estimate a Bayesian model using rstanarm. 
+```{r cache=TRUE, results="hide", message=FALSE, warnings=FALSE}
+set.seed(5750)
+blm2 <- stan_glm(Age ~ Gender * US, data = oscar_data,
+                 prior_intercept = normal(0, 3, autoscale = TRUE),
+                 prior = normal(0, 3, autoscale = TRUE),                 
+                 iter = 10000,
+                 diagnostic_file = file.path(tempdir(), "df2.csv"))
+```
+
+### 5.2.1 Gender 
+#### 5.2.1.1 Gender Marginal Means
+Report point estimates and credible intervals for marginal means of gender
+```{r}
+bem2_gender <- emmeans(blm2, ~ Gender)
+
+bem2_gender_post <- describe_posterior(bem2_gender,
+                                       test = c("bayesfactor"), 
+                                       bf_prior = blm2)
+
+bem2_gender_table <- bem2_gender_post |>
+  kable(caption = "Bayesian Gender Marginal Means", digits = 2)
+
+bem2_gender_table
+```
+
+**Interpretation**: The median estimated age for female Oscar winners is 35.87 years with a 95% credible interval of (33.53, 38.15). The median estimated age for male Oscar winners is 44.03 years with a 95% credible interval of (41.70, 46.36). The estimated median ages of Oscar winners are different between females and males.
+
+#### 5.2.1.2 Difference in Gender Marginal Means
+Report point estimates and credible intervals for the difference in the marginal means of gender 
+```{r}
+set.seed(5750)
+bem2_gender_contr <- emmeans(blm2, ~ Gender, contr = "pairwise")$contrasts
+
+bem2_gender_contr_post <- describe_posterior(bem2_gender_contr,
+                                       test = c("bayesfactor"), 
+                                       bf_prior = blm2)
+
+bem2_gender_contr_post_table <- bem2_gender_contr_post |>
+  kable(caption = "Bayesian Gender Difference", digits = 2)
+
+bem2_gender_contr_post_table
+```
+
+**Interpretation**: The estimated age for winning an Oscar is, on average, 8.17 years younger for females compared to males. The 95% credible interval for age difference is (-11.47, -4.88). The analysis strongly supports the existence of a gender-based difference in the age of Oscar winners, with female winners being younger than male winners.
+
+### 5.2.2 Nationality
+#### 5.2.2.1 Nationality Marginal Means
+Report point estimates and credible intervals for marginal means of nationality
+```{r}
+set.seed(5750)
+bem2_US <- emmeans(blm2, ~ US)
+
+bem2_US_post <- describe_posterior(bem2_US,
+                                   test = c("bayesfactor"), 
+                                   bf_prior = blm2)
+
+bem2_US_post_table <- bem2_US_post |>
+  kable(caption = "Bayesian Nationality Marginal Means", digits = 2)
+
+bem2_US_post_table
+```
+
+**Interpretation**: The median estimated age for non-US Oscar winners is 39.91 years old with a 95% credible interval of (37.15, 42.60). The median estimated age for US Oscar winners is also 39.97 years old with a 95% credible interval of (38.14, 41.82). For Oscar winners from the US and outside of the US, the median estimated age are almost identical.
+
+#### 5.2.2.2 Difference in Nationality Marginal Means
+Report point estimates and credible intervals for the difference in the marginal means of nationality
+```{r}
+set.seed(5750)
+bem2_US_contr <- emmeans(blm2, ~ US, contr = "pairwise")$contrasts
+
+bem2_US_contr_post <- describe_posterior(bem2_US_contr,
+                                         test = c("bayesfactor"), 
+                                         bf_prior = blm2)
+
+bem2_US_contr_post_table <- bem2_US_contr_post |>
+  kable(caption = "Bayesian Nationality Difference", digits = 2)
+
+bem2_US_contr_post_table
+```
+**Interpretation**: There is nearly zero difference in the median age of Oscar winners based on nationality (US vs. non-US). Such lack of difference is further supported by the 95% credible interval that includes zero (-3.42, 3.27).
+
+### 5.2.3 Conditional Effect of Gender 
+#### 5.2.3.1 Gender Effect for US Winners 
+Report point estimates and credible intervals for conditional effect of gender for US winners
+```{r}
+set.seed(5750)
+bem2_cond_US <- emmeans(blm2, specs = ~ Gender * US, 
+                        contr = list("Female - Male (US)" = c(0, 0, 1, -1)))$contrasts
+
+bem2_cond_US_post <- describe_posterior(bem2_cond_US,
+                                     test = c("bayesfactor"), 
+                                     bf_prior = blm2)
+
+bem2_cond_US_post_table <- bem2_cond_US_post|>
+  kable(caption = "Bayesian Gender Effect for US Winners", digits = 2)
+
+bem2_cond_US_post_table
+```
+**Interpretation**: This estimation indicats a notable gender-based age disparity among Oscar winners in the US, with female winners being younger than their male counterparts. The median difference (-6.96) and the 95% credible interval (-10.63, -3.25) both affirm this trend. 
+
+#### 5.2.3.2 Gender Effect for Non-US Winners
+Report point estimates and credible intervals for the conditional effect of gender for non-US winners
+```{r}
+set.seed(5750)
+bem2_cond_nonUS <- emmeans(blm2, specs = ~ Gender * US, 
+                      contr = list("Female - Male (non-US)" = c(1, -1, 0, 0)))$contrasts
+
+bem2_cond_nonUS_post <- describe_posterior(bem2_cond_nonUS,
+                                        test = c("bayesfactor"), 
+                                        bf_prior = blm2)
+
+bem2_cond_nonUS_post_table <- bem2_cond_nonUS_post |>
+  kable(caption = "Bayesian Gender Effect for Non-US Winners", digits = 2)
+
+bem2_cond_nonUS_post_table
+```
+**Interpretation**: The Bayesian analysis reveals a gender-based age disparity among Oscar winners outside the US, with female winners being notably younger than male winners. The median difference (-9.41) and the credible interval (-14.83, -3.93) both point to this trend. 
+
+### 5.2.4 Gender Effect Difference (US vs. non-US)
+Report point estimates and credible intervals for: the difference in the two conditional effects
+```{r}
+set.seed(5750)
+# Compute the contrasts for the difference in conditional effects
+bem2_cond_diff <- emmeans(blm2, specs = ~ Gender * US, 
+                          contr = list("US - non-US" = c(-1, 1, 1, -1)))$contrasts
+
+# Describe the posterior for the contrast
+bem2_cond_diff_post <- describe_posterior(bem2_cond_diff,
+                                          test = c("bayesfactor"), 
+                                          bf_prior = blm2)
+
+# Create the table
+bem2_cond_diff_post_table <- bem2_cond_diff_post |>
+  kable(caption = "Bayesian Difference in Gender Effect by Nationality", digits = 2)
+
+bem2_cond_diff_post_table
+```
+**Interpretation**: The Bayesian analysis suggests negligible difference in the gender-based age disparity between US and non-US Oscar winners. Although the US winners shows a slightly higher median difference than non-US winners (2.46), the evidence is weak considering that a 95% credible interval that includes zero (-4.07, 9) and a negative log Bayes Factor, which shows moderate evidence for the null hypothesis of no difference. 
+
+# Question 6
+## 6.1 Frequentist Equivalence Test
+Compute a Frequentist equivalence test to determine whether the sample-size weighted marginal means of age for US and non-US winners (averaged over gender) are equivalent within a range of +/- 3 years. Report a p-value and provide a brief interpretation of the equivalence test. 
+```{r}
+em2_eqv <- emmeans(lm2, ~ US, 
+                   weights = "proportional", 
+                   contr = "pairwise")
+
+freq_q6 <- summary(em2_eqv$contrasts, 
+                   infer = TRUE,
+                   null = 0, 
+                   delta = 3, 
+                   side = "equivalence")
+
+freq_q6
+```
+**Interpretation**: We reject the null hypothesis of non-equivalence (P<0.0395). Therefore, we conclude equivalence between the mean ages of US and non-US Oscar winners within the range (-3, 3).
+
+## 6.2 Bayesian Equivalence Test
+Then redo the same analysis but compute a Bayes Factor that compares a model with diffuse priors (as defined in the previous Bayesian models) versus a prior that expresses equivalence within the same region of +/- 3 years. Provide a brief write-up for each result. Expected length is about 1-3 sentences.
+
+**Corrected Code**: Added code to compute the Bayes Factor
+```{r eval = FALSE}
+# Define diffuse priors similar to blm2
+prior_diffuse <- c(prior(normal(0, 3), class = "b"),
+                   prior(normal(0, 3), class = "Intercept"))
+
+# Define the model with diffuse priors
+model_diffuse <- brm(Age ~ Gender * US, data = oscar_data, 
+                     family = gaussian(), prior_diffuse, 
+                     save_pars = save_pars(all = TRUE))
+
+# Define a tighter prior for the US effect for equivalence within +/- 3 years
+prior_equivalence <- c(prior(normal(0, 1), class = "b", coef = "US"),
+                       prior(normal(0, 3), class = "b", coef = "Gender"),
+                       prior(normal(0, 3), class = "b", coef = "Gender:US"),
+                       prior(normal(0, 3), class = "Intercept"))
+
+# Define the model with equivalence prior
+model_equivalence <- brm(Age ~ Gender * US, data = oscar_data, 
+                         family = gaussian(), prior_equivalence, 
+                         save_pars = save_pars(all = TRUE))
+
+bf_result <- bayes_factor(model_diffuse, model_equivalence) 
+
+bf_result
+```
+
+```{r}
+bem2_eqv <- emmeans(blm2, ~ US, 
+                    weights = "proportional", 
+                    contr = "pairwise")
+
+bayes_q6 <- describe_posterior(bem2_eqv$contrasts,
+                               ci = .95,
+                               test = c("rope"),
+                               rope_range = c(-3, 3))
+
+bayes_q6
+```
+
+**Interpretation**: A high percentage (97.07%) of the posterior distribution lies within the ROPE range, suggesting that the difference in mean ages between US and non-US Oscar winners is practically equivalent within the [-3.00, 3.00] range. 
+
+# Question 7 
+An interesting advantage of the Bayesian approach is that a variety of priors can be compared with the Bayes Factor using the bridge sampling approach. Consider the simple model question 3 again where we compared the mean age of males and females. Using the bridgesampling approach, estimate the following four models, and then compute Bayes Factors for each possible comparison. For each model, always use a diffuse prior in the intercept defined as normal(0,3). Please note that the variance on the priors is based on the standardized and autoscaled values from rstanarm.
+
+* Model 1: diffuse prior on mean difference $normal(0,3)$
+* Model 2: essentially point-null prior on mean difference $normal(0,.01)$
+* Model 3: a uniform prior ranging from -3 to 3 $uniform(-3,3), lb = 3, ub = 3$
+* Model 4: a absurdly diffuse prior on mean difference $normal(0,500)$
+
+**Corrected Answer (Provided)**: 
+1. Autoscale each model (standardize the unit)
+
+```{r}
+get_prior_1 <- stan_glm(Age ~ Gender*US, data = oscar_data, family = gaussian(),
+                  prior = normal(0,3, autoscale = TRUE),
+                  prior_intercept = normal(0,3, autoscale= TRUE))
+prior_summary(get_prior_1)
+```
+
+2. Then, based on the `prior_summary()`, construct the priors 
+```{r eval = FALSE}
+prior1 <- c(prior("normal(0,33)", class = "Intercept"),
+            prior(c("normal(0,66),normal(0,92),normal(0,69)"), class = "b"))
+
+prior2 <- c(prior("normal(0,33)", class = "Intercept"),
+            prior("normal(0,.22)", class = "b"))
+
+prior3 <- c(prior("normal(0,33)", class = "Intercept"),
+            prior("uniform(-3,3)", lb = -3, ub = 3, class = "b"))
+prior4 <- c(prior("normal(0,33)", class = "Intercept"),
+            prior("normal(0,10986)", class = "b"))
+```
+
+3. Run this in models
+```{r cache=TRUE, results="hide", message=FALSE, warnings=FALSE, eval = FALSE}
+set.seed(5750)
+# compute Bayes Factors for each possible comparison
+model1 <- brm(Age ~ Gender, data = oscar_data, 
+              prior = c(prior(normal(0, 3), class = "b"), 
+                        prior(normal(0, 3), class = "Intercept")),
+              family = gaussian(),
+              save_pars=save_pars(all=TRUE))
+
+model2 <- brm(Age ~ Gender, data = oscar_data, 
+              prior = c(prior(normal(0, 0.01), class = "b"), 
+                        prior(normal(0, 3), class = "Intercept")),
+              family = gaussian(),
+              save_pars=save_pars(all=TRUE))
+
+model3 <- brm(Age ~ Gender, data = oscar_data, 
+              prior = c(prior(uniform(-3, 3), class = "b"), 
+                        prior(normal(0, 3), class = "Intercept")),
+              family = gaussian(),
+              save_pars=save_pars(all=TRUE))
+
+model4 <- brm(Age ~ Gender, data = oscar_data, 
+              prior = c(prior(normal(0, 500), class = "b"), 
+                        prior(normal(0, 3), class = "Intercept")),
+              family = gaussian(),
+              save_pars=save_pars(all=TRUE))
+```
+
+```{r cache=TRUE, results="hide", message=FALSE, warnings=FALSE, eval = FALSE}
+set.seed(5750)
+# Comparing model1 with model2, model3, and model4
+bf_12 <- bayes_factor(model1, model2)
+bf_13 <- bayes_factor(model1, model3)
+bf_14 <- bayes_factor(model1, model4)
+
+# Comparing model2 with model3 and model4
+bf_23 <- bayes_factor(model2, model3)
+bf_24 <- bayes_factor(model2, model4)
+
+# Comparing model3 with model4
+bf_34 <- bayes_factor(model3, model4)
+```
+
+```{r eval = FALSE}
+bf_12
+bf_13
+bf_14
+bf_23
+bf_24
+bf_34
+```
+
+1. **Model1 vs. Model2 (BF = 2273.53661)**: 
+   - Interpretation: There is extremely strong evidence in favor of Model1 when compared to Model2.
+
+2. **Model1 vs. Model3 (BF = 31.50357)**:
+   - Interpretation: There is strong evidence in favor of Model1 over Model3. 
+
+3. **Model1 vs. Model4 (BF = 11.03069)**:
+   - Interpretation: This Bayes Factor also indicates strong evidence in favor of Model1 compared to Model4.
+
+4. **Model2 vs. Model3 (BF = 0.01411)**:
+   - Interpretation: There is strong evidence in favor of Model3 over Model2. Since the Bayes Factor is less than 1, we interpret its reciprocal (about 70.86) as the strength of evidence in favor of Model3.
+
+5. **Model2 vs. Model4 (BF = 0.00487)**:
+   - Interpretation: Similarly, there is very strong evidence in favor of Model4 over Model2. The reciprocal of the Bayes Factor (approximately 205.33) indicates a very strong preference for Model4.
+
+6. **Model3 vs. Model4 (BF = 0.34995)**:
+   - Interpretation: There is moderate evidence in favor of Model4 over Model3. Since the BF is between 0.33 and 3, the evidence is not particularly strong.
+
+### Overall Conclusion
+- Model1 is very strongly supported compared to the other models, particularly against Model2.
+- Model3 is strongly preferred over Model2.
+- The comparison between Model3 and Model4 shows some evidence in favor of Model4, but this evidence is not strong.
+
+(Referenced ChatGPT)
+
+\newpage
+# Question 8
+Imagine that you have a 3 x 5 factorial between-subjects design. Factor A has 3 levels, and B has 5 levels. Code a contrast to answer the following question:
+
+## 8.1
+Is there a difference between B1 and the average of B2, B3, B4, and B5 within the stratum of A1?
+
+|   | B1|    B2|    B3|    B4|    B5|
+|:--|--:|-----:|-----:|-----:|-----:|
+|A1 |  1|  -1/4|  -1/4|  -1/4|  -1/4|
+|A2 |  0|     0|     0|     0|     0|
+|A3 |  0|     0|     0|     0|     0|
+
+## 8.2
+Is there a difference between factor levels B1 and the average of B2, B3, B4, and B5 when averaged over A1, A2, and A3?
+
+|   | B1|    B2|    B3|    B4|    B5|
+|:--|--:|-----:|-----:|-----:|-----:|
+|A1 |1/3| -1/12| -1/12| -1/12| -1/12|
+|A2 |1/3| -1/12| -1/12| -1/12| -1/12|
+|A3 |1/3| -1/12| -1/12| -1/12| -1/12|
+
+## 8.3
+Is the difference between factor levels B1 and B2 within stratum A1, different from the difference between factor levels B1 and B2 within **strata A2 and A3 combined**(average between A2 and A3)?
+
+|   |  B1|    B2|    B3|    B4|    B5|
+|:--|---:|-----:|-----:|-----:|-----:|
+|A1 |   1|    -1|     0|     0|     0|
+|A2 |-1/2|   1/2|     0|     0|     0|
+|A3 |-1/2|   1/2|     0|     0|     0|
+ 
+# Question 9
+Using the example of this assignment, explain what the age differences in the marginal means between males and females (averaged over US vs non-US) express when examined using the following weighting schemes. Expected length is about 1-3 paragraphs. (Referenced ChatGPT)
+
+**1. Weighting using Type I SS**
+
+- Type I Sum of Squares are order-dependent: the variable that is entered first is computed first without any adjustment for later variables
+
+- The age difference between genders is interpreted based on its position in the model, which can lead to different interpretations if the order of variables changes. It's most suitable for balanced designs or when the sequence of variables is theoretically justified.
+
+**2. Weighting using Type III SS**
+
+- Computed as unweighted marginal means. What the treatment effect would be if the distribution of males and females in the population was exactly 50:50. fairly reasonable because males and females are approximately 50:50 in the population. However, does won't work if we have 3 categories: female, male, non-binary, because these three are often not equally distributed.
+
+- In a study examining age differences between males and females, averaged over US vs non-US status, Type III Sum of Squares (SS) offers a balanced analytical approach. This method evaluates the gender effect on age while equally accounting for the influence of nationality, irrespective of the variables' order in the model. It computes the marginal means comparison, providing an overall estimate of gender differences that is controlled for US vs non-US status. This approach is particularly advantageous in unbalanced designs, ensuring the gender effect on age is neither skewed by the order of factors in the model nor by unequal sample sizes within nationality groups. Consequently, Type III SS yields a generalized and unbiased view of the gender impact on age in a factorial design.
+
+**3. Weighting using the sample-sized weighted marginal means (obtained by using propor-tional weighting in emmeans)**
+
+- Weighed by the marginal sample size. This approach calculates average effects across factor levels, weighted by sample size. Unlike Unweighted marginal means, can handle unequally dis-tributed 3 categories (example: male, female, non-binary).
+
+- For age differences between genders, proportional weighting in `emmeans` reflects the actual sample distribution across male and female winners in the US and non-US groups. It’s beneficial when sample sizes are unequal, offering a realistic interpretation of gender differences as they exist in the population.
+
+\newpage
+# Quesiton 10
+A concept that we have not yet discussed in class is the intra-class correlation coefficient (ICC). It is sometimes computed for models with repeated measures and is defined as the proportion of the variance of the random effect divided by the variance of the random effect plus the residual variance. Answer the questions below, expected length is about 2-3 paragraphs.
+
+$ICC = \frac{Variance\ of\ the\ random\ effect}{Variance\ of\ the\ random\ effect + Variance\ of\ the\ residual}$
+
+**Explain in your own words what it would mean if the ICC is 0.**
+- Answer: An ICC of 0 indicates that all variability in the data is within groups, and none is between groups. This suggests that the grouping factor (like subjects in a study) does not contribute to the variability in the outcome, and individual differences are solely responsible for the observed variance.
+
+**Then explain in your own words what it would mean if the ICC was 1.**
+- Answer: An ICC of 1 means all variability in the data is due to differences between groups, with no variability within groups. This implies homogeneity within groups and complete heterogeneity between groups, suggesting that the grouping factor fully accounts for the variation in the data.
+
+**Then using what you learned about shrinkage, form a conjecture whether shrinkage is more or less pronounced in situations with a very low or very high ICC.** 
+- Answer: Shrinkage, or the adjustment of estimates towards group means, is less pronounced with a low ICC (close to 0) since individual-level variability dominates. With a high ICC (close to 1), shrinkage is more pronounced as group-level variability is the primary source of variance, leading to a greater adjustment of individual estimates towards group means.
+
+(Referenced ChatGPT)
