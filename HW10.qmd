@@ -1,0 +1,433 @@
+---
+title: "Assignment 10"
+subtitle: "Lusi (Ruth) Wang"
+format:
+    pdf: default
+---
+Note: ChatGPT and GitHub Copilot were used for references in this homework.
+```{r}
+#| warning: false
+#| message: false
+
+library(haven)
+library(emmeans)
+library(readr)
+library(labelled)
+library(rstanarm)
+library(BayesFactor)
+library(easystats)
+library(tidyverse)
+library(BFpack)
+library(dplyr)
+library(tidyr)
+library(knitr)
+library(ggplot2)
+library(ggdist)
+library(brms)
+library(broom)
+library(scales)
+library(pwr)
+library(patchwork)
+library(lme4)
+library(lmerTest)
+library(pbkrtest)
+library(modelr)
+
+```
+
+\newpage
+# Question 1
+First, import the data, code ID and condition as factors, and generate a table that
+reports the mean and standard deviation of the outcome variable (“rt”) for all intensity levels.  For this and following questions, please always round your numbers to 2 decimal places and use well-formatted tables.
+```{r}
+# Import the data from the URL
+url <- "https://github.com/felixthoemmes/hwdatasets/blob/master/rt.csv?raw=true"
+data <- read.csv(url)
+
+data$ID <- as.factor(data$ID)
+data$cond <- as.factor(data$cond)
+
+data$cond <- factor(data$cond, levels = c("low", "med", "hi"))
+
+# Group by Condition
+cond_summary <- data |>
+  group_by(cond) |>
+  summarize(
+    mean = mean(y, na.rm = TRUE),
+    sd = sd(y, na.rm = TRUE),
+    n = n()
+  ) 
+
+cond_summary_table <- kable(cond_summary,
+        caption = "Summary for Reaction Time by Distraction Intensity",
+        digits = 2,
+        col.names = c("Intensity", "Mean", "SD", "Count")
+        )
+
+cond_summary_table
+```
+\newpage
+# Question 2
+## 2.1 Grouped Boxplot
+Firstdisplay a grouped boxplot, where you plot all reaction times (across all subjects) separately for each condition. 
+```{r}
+box_plot <- ggplot(data, aes(x = cond, y = y, fill = cond)) +
+  geom_boxplot() +
+  labs(title = "Boxplot of Reaction Time by Intensity",
+       x = "Distraction Intensity",
+       y = "Reaction Time") +
+  theme_minimal()
+
+box_plot
+```
+
+## 2.2 Spaghetti Plot
+For the spaghetti plot, first form averages by ID and condition, and then plot the averages of each person across conditions as lines. The plot will have condition on the x-axis, the average response for each person on the y-axis, and a single line for each person. Importantly, you are not plotting individual datapoints anymore, but averages for each person. 
+```{r}
+# Calculate average reaction time for each person in each condition
+average_data <- data |>
+  group_by(ID, cond) |>
+  summarize(avg_rt = mean(y, na.rm = TRUE))
+
+# Create spaghetti plot
+average_plot <- ggplot(average_data, aes(x = cond, y = avg_rt, 
+                                       group = ID, 
+                                       color = as.factor(ID))) +
+  geom_line(alpha = 0.5) + 
+  labs(title = "Spaghetti Plot of Average Reaction Time by Intensity",
+       x = "Distraction Intensity",
+       y = "Average Reaction Time") +
+  theme_minimal() + 
+  ylim(0, 13) +
+  theme(legend.position = "none") # Hide the legend
+
+average_plot
+```
+\newpage
+# Quesiton 3
+Perform a frequentist analysis with condition as a predictor, and ID as a fixed factor. That means, that you insert condition, ID, and the interaction as predictors in an lm model. Please note that this is an incorrect analysis, as it assumes that every row is an independent subject. The degrees of freedom will be incorrect for this model. Report the means of the conditions, along with a main effect, and all pairwise differences between the marginal means.
+
+## 3.1 Means of the conditions
+```{r}
+# Fit linear model with ID and condition as predictors and their interaction
+lm1 <- lm(y ~ ID * cond, data = data)
+
+# Means of the conditions
+means_cond <- summary(emmeans(lm1, ~ cond), infer = T)
+
+means_cond_table <- means_cond |> 
+  mutate(p.value = pvalue(p.value)) |>
+  kable(caption = "Frequentist Means of Conditions",
+        digits = 2)
+
+means_cond_table
+```
+## 3.2 Main effect
+```{r}
+main_effect <- joint_tests(lm1)
+
+main_effect_table <- main_effect |>
+  tibble() |>
+  filter(`model term` == "cond") |>
+  mutate(p.value = pvalue(p.value)) |>
+  kable(caption = "Frequentist Main Effect of Condition",
+        digits = 2)
+
+main_effect_table
+```
+## 3.3 Pairwise differences between the marginal means
+```{r}
+# Pairwise differences between the marginal means
+pairwise_comparisons <- summary(emmeans(lm1, ~ cond, contr="pairwise"), infer=T)
+
+pairwise_comparisons_table <- pairwise_comparisons$contrasts |> 
+  mutate(p.value = pvalue(p.value)) |>
+  kable(caption = "Frequentist Pairwise Comparisons between Conditions",
+        digits = 2)
+
+pairwise_comparisons_table
+```
+
+\newpage
+# Question 4
+Now, redo the previous model, but use ID as a random factor. That means that you enter the condition as a fixed factor, then add a random effect for the intercept and the condition. This means that both the level, and the effect of condition are allowed to vary randomly by ID. Again, report the means of the conditions, along with a main effect, and all pairwise differences between the marginal means. Also report the amount of variability in the intercept and in the condition effects (you can find them in the summary statement of lmer).
+
+## 4.1 Means of the conditions
+```{r}
+lm2 <- lmer(y ~ 1 + cond + (1 + cond|ID), data = data)
+
+means_cond_2 <- summary(emmeans(lm2, ~ cond),infer=T)
+
+means_cond_table_2 <- means_cond_2 |> 
+  mutate(p.value = pvalue(p.value)) |>
+  kable(caption = "Frequentist Means of Conditions 2",
+        digits = 2)
+
+means_cond_table_2
+```
+
+## 4.2 Main effect
+```{r}
+main_effect_2 <- joint_tests(lm2)
+
+main_effect_table_2 <- main_effect_2 |> 
+  mutate(p.value = pvalue(p.value)) |>
+  kable(caption = "Frequentist Main Effect of Condition 2",
+        digits = 2)
+
+main_effect_table_2
+```
+
+## 4.3 Pairwise differences between the marginal means
+```{r}
+pairwise_comparisons_2 <- summary(emmeans(lm2, ~ cond, contr = "pairwise"), infer=T)
+
+pairwise_comparisons_table_2 <- pairwise_comparisons_2$contrasts |> 
+  mutate(p.value = pvalue(p.value)) |>
+  kable(caption = "Frequentist Pairwise Comparisons between Conditions 2",
+        digits = 2)
+
+pairwise_comparisons_table_2
+```
+
+## 4.4 Variability
+```{r}
+sum_lm2 <- summary(lm2)
+
+sum_lm2
+```
+**Answer**: Intercept variability is (Variance: 1.549, SD: 1.245). Conditional effects variability includes median distraction (Variance: 1.702, SD: 1.304) and high distraction (Variance: 7.019, SD: 2.649).
+
+\newpage
+# Question 5
+Redo the analysis from Question 3 using Bayesian statistics. 
+
+## 5.1 A null model against all models
+Report Bayes Factors that compare a null model against all other possible models. Treat ID as a fixed factor. 
+```{r cache=TRUE}
+set.seed(5750)
+bf_null <- anovaBF(y ~ cond * ID, data = data, whichModels = "bottom")
+
+bf_null
+```
+**Interpretation**: The extermely large Bayes Factors indicate overwhelmingly strong evidence for the effects of `cond`, `ID`, and their interaction on the reaction time. The large Bayes foactors for `cond`, `ID`, and `cond:ID` suggest they are extremely predictive of the outcome, vastly outperforming a model without these predictors (the null model).
+
+## 5.2 Full model against all models
+Then report Bayes Factors that compare the most complex models to all other possible models. 
+```{r cache=TRUE}
+set.seed(5750)
+bf_full <- anovaBF(y ~ cond * ID, data = data, whichModels = "top")
+
+bf_full
+```
+**Interpretation**: The extremely low Bayes Factors indicate that the full model, encompassing `cond`, `ID`, and their interaction `cond:ID`, is significantly more supported by the data compared to any simpler model that omits one of these elements. This suggests that each component - `cond`, `ID`, and their interaction - plays a crucial role in the model's predictive power.
+
+## 5.3 Estimation
+Then do Bayesian estimation in rstan, using the exact same model as in Question 3. (with condition as a predictor, and ID as a fixed factor. This means that you insert condition, ID, and the interaction as predictors in an linear model.) 
+
+Use priors normal(0,3) for the coefficients, and normal(0,3) for the intercept. 
+```{r cache=TRUE, results="hide", message=FALSE, warnings=FALSE}
+set.seed(5750)
+blm1 <- stan_glm(y ~ cond * ID, data = data,
+                   family = gaussian(link = "identity"), 
+                   prior = normal(0,3, autoscale=TRUE),
+                   prior_intercept = normal(0,3, autoscale=TRUE))
+```
+
+### 5.3.1 Means of all conditions
+Report the means of all conditions (with credible intervals)
+```{r}
+set.seed(5750)
+means_cond <- summary(emmeans(blm1, "cond"), infer = c(TRUE, TRUE))
+
+means_cond_table <- means_cond |>
+  tibble() |>
+  kable(caption = "Bayesian Means of All Conditions",
+        digits = 2)
+
+means_cond_table
+```
+
+### 5.3.2 Pairwise mean differences
+Report all pairwise mean differences (with credible intervals).
+```{r}
+set.seed(5750)
+pair_comp <- summary(emmeans(blm1,"cond", contr = "pairwise")$contrasts, 
+                     infer = c(TRUE, TRUE))
+
+pair_comp_table <- pair_comp |>
+  tibble() |>
+  kable(caption = "Bayesian Pairwise Comparisons",
+        digits = 2)
+  
+pair_comp_table
+```
+
+# Question 6
+Now redo the analyses from Question 4 in a Bayesian framework.
+
+## 6.1 A null model against all models
+Compute Bayes Factors and estimate the posterior distributions (and report credible intervals) for both contrasts. That compare a null model against all other possible models. Again, treat ID as a random factor. 
+```{r}
+set.seed(5750)
+bf_null_2 <- anovaBF(y ~ cond * ID, data = data,
+                         whichRandom = "ID", 
+                         whichModels = "bottom")
+bf_null_2
+```
+**Interpretation**: When treating `ID` as a random factor, we define the null model as `y ~ ID`. The extermely large Bayes Factor indicates that there is significantly more eividence in support of the alternative model `y ~ cond + ID`.This outcome strongly indicates that `cond` is a significant predictor of the reaction time, beyond the random variability attributed to `ID`.
+
+## 6.2 Full model against all models
+Then report Bayes Factors that compare the most complex models to all other possible models. Again, treat ID as a random factor. 
+```{r}
+set.seed(5750)
+bf_full_2 <- anovaBF(y ~ cond * ID, data = data,
+                         whichRandom = "ID", 
+                         whichModels = "top")
+bf_full_2
+```
+**Interpretation**: Treating `ID` as a random factor, the full model is `y ~ cond + ID`. In this case, the extremely low Bayes Factor suggests strong evidence in faor of the full model over the alternative model when we omit  `cond`. This demonstrates that `cond` plays a significant role in predicting reaction time.
+
+## 6.3 Estimation
+Then do Bayesian estimation in rstan, using the exact same model as in Question 4. You will have to use stan_glmer. Use priors normal(0,3) for the coefficients, and normal(0,3) for the intercept. 
+```{r cache=TRUE, results="hide", message=FALSE, warnings=FALSE}
+set.seed(5750)
+blm2 <- stan_glmer(y ~ 1 + cond + (1 + cond|ID), data = data,
+                   family = gaussian(link = "identity"), 
+                   prior = normal(0,3, autoscale=TRUE),
+                   prior_intercept = normal(0,3, autoscale=TRUE))
+```
+
+### 6.3.1 Means of all conditions
+Report the means of all conditions (with credible intervals)
+```{r}
+set.seed(5750)
+
+means_cond_2 <- summary(emmeans(blm2, "cond"), infer = c(TRUE, TRUE))
+
+means_cond_table_2 <- means_cond_2 |>
+  tibble() |>
+  kable(caption = "Bayesian Means of All Conditions 2",
+        digits = 2)
+
+means_cond_table_2
+```
+
+### 6.3.2 Pairwise mean differences
+Report all pairwise mean differences (with credible intervals)
+```{r}
+set.seed(5750)
+pair_comp_2 <- summary(emmeans(blm2,"cond", contr = "pairwise")$contrasts, 
+                     infer = c(TRUE, TRUE))
+
+pair_comp_table_2 <- pair_comp_2 |>
+  tibble() |>
+  kable(caption = "Bayesian Pairwise Comparisons 2",
+        digits = 2)
+  
+pair_comp_table_2
+```
+\newpage
+## Question 7
+Form model predictions from the frequentist fixed effects and random effects model, and plot spaghetti plots of the predictions in a similar manner in which you constructed the previous spaghetti plot. Compare the two spaghetti plots of model-implied values that you are constructing in this plot with the spaghetti plot of the descriptive statistics that you obtained earlier. Mention and briefly explain the concept of shrinkage in your answer.
+```{r}
+# Fixed Effects Prediction Model
+data <- data |> 
+  add_predictions(lm1) |> 
+  rename(pred_rt_1 = pred)
+
+plot_fixed <- ggplot(data, aes(x = cond, y = pred_rt_1, 
+                                   group = ID, 
+                                   color = as.factor(ID))) +
+                geom_line(alpha = 0.5) +
+                labs(title = "Fixed Effects",
+                x = "Distraction Intensity",
+                y = "Predicted Reaction Time") +
+                theme_minimal() +
+                ylim(0, 13) +
+                theme(legend.position = "none") # Hide the legend
+
+# Random Effects Prediction Model
+data <- data |> 
+  add_predictions(lm2) |> 
+  rename(pred_rt_2 = pred)
+
+plot_random <- ggplot(data, aes(x = cond, y = pred_rt_2, 
+                                   group = ID, 
+                                   color = as.factor(ID))) +
+                geom_line(alpha = 0.5) +
+                labs(title = "Random Effects",
+                x = "Distraction Intensity",
+                y = "Predicted Reaction Time") +
+                theme_minimal() +
+                ylim(0, 13) +
+                theme(legend.position = "none") # Hide the legend
+
+average_plot <- average_plot + 
+                labs(title = "Average")
+
+plots_comp <- average_plot | plot_fixed | plot_random
+
+plots_comp
+```
+**Answer**: In the spaghetti plot where `condition` is a predictor and `ID` is treated as a fixed factor, the plot resembles the one generated by averaging `ID` and `condition`. Conversely, in the plot where `condition` is a predictor and `ID` is a random factor, the lines appear more closely grouped, exhibiting a narrower range between the highest and lowest values. This observation exemplifies shrinkage, a phenomenon where estimates for different levels of a random effect (like `ID`) are pulled towards the overall mean across the entire dataset, leading to a more compact and centralized distribution of predictions. By treating `ID` as a random factor, we reduced variability among the individual estimates, causing the observed shrinkage in the plot.
+(Referenced ChatGPT)
+
+\newpage
+# Question 8
+List two advantages and two disadvantages of within-subjects designs (designs with repeated measures) in comparison with between-subjects designs.
+
+**Answer:** Compared to between-subject designs, within-subject deisgns has two major advantages: 
+
+1. **Reduced Variability**: Since the same subjects are used across all conditions, the variability due to individual differences is greatly reduced. Each participant acts as their own control, which makes it easier to detect the effects of the independent variable.
+
+2. **Resource Efficiency**: Requires fewer participants than between-subjects designs because each participant provides data for multiple conditions. This can be especially beneficial in situations where recruiting participants is difficult or costly.
+
+Compared to between-subject designs, within-subject deisgns has two disadvantages:
+
+1. **Carryover Effects**: Since the same subjects are used across all conditions, the experience in one condition could carry over and affect performance in subsequent conditions, such as fatigue and learning effects. 
+
+2. **Limited Applicability**: Not all research questions or experimental treatments are suitable for within-subjects designs. For instance, it's impractical when the treatment has a lasting effect that cannot be undone or when the study aims to investigate permanent changes or one-time events.
+
+(Referenced ChatGPT)
+
+\newpage
+# Question 9 
+Explain in your own words why a researcher might be interested in a random effect, and what one can learn from it.
+
+**Answer**: Researchers often include random effects in their statistical models to address specific data characteristics and research questions:
+
+- **Variability Across Groups:** In scenarios like educational research, where students are nested within classes, and classes within schools, random effects for 'school' or 'class' enable researchers to account for unique characteristics of these groups and generalize findings beyond the specific sample.
+
+- **Unobserved Heterogeneity:** Random effects help control for unobserved variability in units like individuals or regions, allowing for a clearer isolation of the main variables' effects.
+
+- **Non-independence in Data:** Particularly in longitudinal or nested studies (e.g., patients in hospitals), random effects appropriately model the inherent correlation within groups, addressing the violation of the independence assumption.
+
+- **Insights from Variation:** Including random effects sheds light on how outcomes vary across different levels or clusters, aiding in understanding and generalizing results in fields such as policy-making and clinical trials.
+
+Random effects thus provide a refined analysis in studies with nested structures or non-independent observations, enhancing the generalizability and depth of understanding of the data.
+
+(Referenced ChatGPT)
+
+\newpage
+# Question 10
+Imagine a study in which 9 rats are housed in 3 different cages, each mouse is measured 10 times, under 3 different conditions (30 measurements in total). A single rat always stays in the same cage. Describe in conceptual (not technical) terms how the observed variance in the measurements of the rats can be decomposed.
+
+**Answer:** The observed variance in the measurements can be conceptually decomposed into several components:
+The observed variance in the measurements can be succinctly decomposed as follows:
+
+- **Individual Rat Variance (Within-Subject):** This reflects differences between rats, encompassing unique genetic, health, and behavioral traits.
+
+- **Cage Variance (Intra-group):** Variance due to the specific conditions of each cage, such as size, cleanliness, and environmental factors, affecting the measurements within each cage.
+
+- **Between-Cage Variance (Inter-group):** Differences stemming from cage-to-cage variations, like location in the room or minor environmental discrepancies, influencing the average measurements from each cage.
+
+- **Condition-Related Variance:** Variability arising from how each rat reacts to the three different conditions, influenced by the nature of these conditions and individual rat responses.
+
+- **Time-Based Variance:** Variance associated with the timing of measurements, including factors like the time of day, rat's age at each measurement, and the effects of previous conditions.
+
+- **Interaction Effects:** Potential interactions, for instance, how a rat's response to a condition might vary depending on the cage, or how the impact of a condition changes over time.
+
+- **Random Variance:** Inevitable random fluctuations that encompass measurement errors and unexplained biological variation.
+
+(Referenced ChatGPT)
