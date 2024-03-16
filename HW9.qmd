@@ -1,0 +1,430 @@
+---
+title: "Assignment 9"
+subtitle: "Lusi (Ruth) Wang"
+format:
+    pdf: default
+---
+Note: ChatGPT and GitHub Copilot were used for references in this homework.
+```{r}
+#| warning: false
+#| message: false
+
+library(haven)
+library(emmeans)
+library(readr)
+library(labelled)
+library(rstanarm)
+library(BayesFactor)
+library(easystats)
+library(tidyverse)
+library(BFpack)
+library(dplyr)
+library(tidyr)
+library(knitr)
+library(ggplot2)
+library(ggdist)
+library(brms)
+library(broom)
+library(scales)
+library(pwr)
+library(patchwork)
+```
+
+\newpage
+# Question 1
+First, import the data, recode factors if necessary, and generate a table that reports the mean and standard deviation of the outcome variable (“value”), and the sample size for all possible combinations of factor levels of all factors (8 groups total). Please present all this information in a well-formatted table, and use appropriate rounding.
+```{r}
+# import data
+data_url <- "https://github.com/felixthoemmes/hwdatasets/blob/master/arguments.sav?raw=true"
+data <- read_sav(data_url)
+
+# convert to factors
+data$value <- labelled::to_factor(data$value)
+data$monitors <- labelled::to_factor(data$monitors)
+data$argument <- labelled::to_factor(data$argument)
+data$source <- labelled::to_factor(data$source)
+data$factor <- labelled::to_factor(data$factor)
+
+data$value <- as.numeric(data$value)
+
+value_summary <- data |>
+  group_by(factor, monitors, argument, source) |>
+  summarise(
+    n = n(),
+    mean = mean(value, na.rm = TRUE),
+    SD = sd(value, na.rm = TRUE)
+  ) |>
+  ungroup()
+
+value_summary_table <- value_summary |>
+  mutate(across(c(n, mean, SD), ~ round(., 2))) |>
+  kable(caption = "Mean and Standard Deviation of Value Across Groups")
+
+value_summary_table
+```
+
+# Question 2
+In addition to the descriptive statistics above, also generate kernel density estimates, but DO NOT overlay them, as there are too many groups. Instead arrange them in a grid, e,g., factors in rows and columns. The particular arrangement of factors in this grid is up to you. You might find the facet_grid() function in ggplot useful for this. It is not necessary to comment on the graphical display.
+```{r}
+value_summary_plot <- ggplot(data, aes(x=value)) +
+  geom_density(fill="blue", alpha=0.5) +
+  facet_grid(monitors ~ argument + source, scales = "free") +
+  theme_minimal() +
+  labs(title="Kernel Density Estimates for Value Across Groups",
+       x="Value",
+       y="Density") +
+  xlim(0, 8) +
+  ylim(0,0.6)
+
+value_summary_plot
+```
+
+# Question 3
+Perform frequentist hypothesis tests. Estimate a model that includes all main effects and all interactions of all three independent variables as predictors of the outcome. Provide a short write-up for each analysis result that you performed. Expected length is 1-4 sentences.
+
+```{r}
+# f-test
+lm1 <- lm(value ~ monitors * argument * source, data = data)
+
+joint_summary <- joint_tests(lm1) |>
+  tidy() |>
+  mutate(p.value = pvalue(p.value)) |>
+  kable(caption = "Joint Tests for Main Effects and Interactions",
+        col.names = c("Term", "df1", "df2", "F-statistic", "p-value"),
+        digits = c(0,2,2,2,3))
+
+joint_summary
+```
+**1. Main Effects:** Among the 3 main effects, "arguement" (strong or week) significantly influences the perceived "value" of the message (p < 0.001). 
+
+However, neither the "monitors" nor the "source" of the message individually showed a significant impact on the perceived value of the message.
+
+**2. Two-way Interactions:** Among the 3 two-way interacitons, the interaction between "monitors" and "source" showed significant influences (p = 0.003) on the perceived value of the message. This means that the message's "source" on its perceived "value" varies depending on the level of self-monitoring. 
+
+However, other interactions, such as between "monitors" and "argument" or "argument" and "source", did not present significant variations.
+
+**3. Three-way Interaction:** The three-way interaction between "monitors", "argument", and "source" was significant (p < 0.001). This suggests that the combined effect of "source" and "argument" on the perceived "value" is different across varying monitoring levels, emphasizing the complexity of the interplay between these factors. (Referenced ChatGPT)
+
+# Question 4
+Now explore your results a bit deeper, first using Frequentist statistics. Take the highest order interaction that is significant, and use interaction contrasts to explain it. Always report frequentist inferential statistics, including confidence intervals with your chosen contrasts. You should perform whatever analysis is necessary to explain the pattern of the highest-order interaction, but not more. That means, it is likely not necessary to e.g., produce all possible pair-wise comparisons. Provide a short write-up of your result. Expected length is about 1-2 paragraphs.
+
+```{r}
+contrast_results <- emmeans(lm1, ~ monitors * argument | source, 
+                     contr = "pairwise", adjust = "tukey")
+
+contrast_summary <- summary(contrast_results, 
+                    infer = c(TRUE, TRUE), level = 0.95)
+
+contrast_df <- contrast_summary$contrasts |>
+               mutate(p.value = pvalue(p.value)) 
+
+freq_q4 <- kable(contrast_df, 
+      digits = c(0, 0, 2, 2, 0, 2, 2, 2, 3),
+      caption = "Three-Way Interactions Between Monitors, Argument, and Source") 
+      
+
+freq_q4
+```
+
+**Answer**: In the previous table, three-way interaction "monitors:argument:source" is the highest order of interaciton. We explore the three-way interactions by conditioning on source. 
+
+1. When the source is attractive, how do monitors and argument interact?
+From the table above, we identify 3 contrasting groups with significant differences:
+  * low strong - high strong (significantly lower, $p = 0.002$)
+    * Confidence interval (-2.98, -0.52) 
+    * Interpretation: When presented with a strong attractive argument, low-self-monitoring individuals value the argument less than high self-monitoring ones.
+  * high strong - low weak (significantly higher, $p < 0.001$)
+    * Confidence interval (0.61, 3.06)
+    * Interpretation: High self-monitoring individuals value a strong attractive argument more than low-self-monitoring individuals value a weak attractive argument.
+  * high strong - high weak (significantly higher, $p < 0.001$)
+    * Confidence interval (1.02, 3.48)
+    * Interpretation: High self-monitoring individuals value a strong attractive argument more than a weak one.
+
+2. When the source is expert, how do monitors and argument interact? 
+From the table above, we identify 3 contrasting groups with significant differences: 
+  * low strong - high strong (significantly higher, $p < 0.001$)
+    * Confidence interval (0.86, 3.31)
+    * Interpretation: When presented with a strong expert argument, low-self-monitoring individuals value the argument more than high-self-monitoring ones.
+  * low strong - low weak (significantly higher, $p < 0.001$)
+    * Confidence interval (0.94, 3.39) 
+    * Interpretation: Low-self-monitoring individuals value a strong expert argument more than a weak one.
+  * low strong - high weak (significantly higher, $p = 0.006$)
+    * Confidence interval (0.36, 2.81)
+    * Interpretation: Low-self-monitoring individuals value a strong expert argument more than high self-monitoring individuals value a weak expert argument.
+
+Comparing 1 and 2, we observe that when presented with a strong argument, low-self-monitoring individuals value the argument more than high-self-monitoring ones if it's from an expert source. In contrast, when the strong argument is from an attractive source, low-self-monitoring individuals value it less than high-self-monitoring ones.
+
+# Question 5
+
+## 5.1 All models against a null model
+Redo the analysis using Bayesian statistics, first focusing only on Bayes Factors. In particular, report Bayes Factors that compare a null model against all other possible models. 
+```{r cache=TRUE, results="hide", message=FALSE, warnings=FALSE}
+set.seed(5750)
+
+data_processed <- data |>
+  select(value, a = argument, s = source, m = monitors)
+
+blm1 <- anovaBF(value ~ m * s * a, data = data_processed)
+```
+```{r}
+blm1
+```
+**Interpretation**: The model $a + s + a:s + m + a:m + s:m + a:s:m$ is most preferred with a Bayes Factor of 21351.24, indicating strong evidence for this model over the null. This suggests the predictors and their interactions significantly explain the variability in the data. 
+
+## 5.2 All models against full model
+Then report Bayes Factors that compare the most complex models to all other possible models. 
+```{r cache=TRUE, results="hide", message=FALSE, warnings=FALSE}
+set.seed(5750)
+
+blm2 <- anovaBF(value ~ m * s * a, data = data_processed, 
+                whichModel = "top") 
+                # "top" refers to the most complex or "full" model 
+```
+```{r}
+blm2
+```
+**Interpretation**: In a top-down approach, the Bayes Factor is derived from the ratio of the alternative hypothesis to the null hypothesis, with the latter being the full model. we remove predictors (alternative hypothesis) to determine which predictor's absence most significantly impacts the model's explanatory power. 
+
+From the output, it's evident that when the $a:m:s$ interaction is omitted from the full model, we get the lowest value smaller than 1 (approximately 0.0001). This indicates exceptionally strong support for the full model. It implies that the interaction $a:m:s$ is a substantial contributor to the full model, and its exclusion leads to the biggest loss in explanatory power.
+
+# Question 6
+Code and estimate a contrast (and report it along both Frequentist confidence intervals, and Bayesian credible intervals) that answers the following research question: Averaging over the variable “monitors”, how large is the difference between the conditional effect of “source” within the “strong argument” stratum, and the conditional effect of “source” within the “weak argument” stratum?
+
+## 6.1 Frequentist Conditional Effect
+# wrong old answer
+```{r eval = FALSE}
+# compute the conditional effect of “source” within the “strong argument” stratum
+# and the conditional effect of “source” within the “weak argument” stratum
+conditional_effects <- emmeans(lm1, specs = ~ source | argument, 
+                               weights = "proportional")
+
+contrast_output <- contrast(conditional_effects, 
+                             method = "pairwise",
+                             adjust = "none")
+
+contrast_output <- summary(contrast_output, infer = c(TRUE, TRUE)) 
+
+freq_q6 <- kable(contrast_output, 
+      digits = c(0, 0, 2, 2, 0, 2, 2, 2, 3),
+      caption = "Conditional Effects of Source Within Argument Strata")
+
+freq_q6
+
+# Extract the estimates from the contrast_output
+strong_effect <- contrast_output$estimate[contrast_output$argument == "strong"]
+weak_effect <- contrast_output$estimate[contrast_output$argument == "weak"]
+
+# Calculate the difference
+diff_effect <- strong_effect - weak_effect 
+
+diff_effect
+```
+# new corrected answer
+![Coefficient Thought Process](coefficient.png){width=400}
+```{r}
+em1 <- emmeans(lm1, specs = c("source","argument","monitors"),
+               contr = list(c1 = c(0.5, -0.5, -0.5, 0.5, 0.5, -0.5, -0.5, 0.5)))
+
+
+em1 # to see the coefficient assignment order
+
+freq_q6 <- kable(em1$contrasts, 
+      digits = 2,
+      caption = "Frequentist Custom Contrast")
+
+freq_q6
+```
+
+**Answer**: The conditional effect of “source” within the “strong argument” stratum has a confidence interval of (-0.66, 0.66). The conditional effect of “source” within the “weak argument” stratum has a confidence interval of (-0.99, 0.32). The difference between the two conditional effects is 0.33 (strong - weak).
+
+## 6.2 Bayesian Conditional Effect
+```{r cache=TRUE, results="hide", message=FALSE, warnings=FALSE}
+set.seed(5750)
+
+blm3 <- stan_glm (value ~ 1 + monitors * argument * source, data = data,
+                  prior_intercept = normal(0,3, autoscale = TRUE), 
+                  prior = normal(0,3, autoscale = TRUE),
+                  iter = 10000)
+```
+
+# wrong old answer from before
+```{r eval = FALSE}
+bayes_conditional <- emmeans(blm3, specs = ~ source | argument, 
+                                weights = "proportional")
+
+bayes_conditional 
+
+bayes_output <- contrast(bayes_conditional, 
+                             method = "pairwise",
+                             adjust = "none")
+
+bayes_q6 <- kable(bayes_output, 
+      digits = c(0, 0, 2, 2, 2),
+      caption = "Conditional Effects of Source Within Argument Strata")
+
+bayes_q6
+```
+
+# new corrected answer 
+```{r}
+bem3 <- emmeans(blm3, specs = c("source", "argument", "monitors"),
+                contr = list(c1 = c(0.5, -0.5, -0.5, 0.5, 0.5, -0.5, -0.5, 0.5)))
+                # see the photo for coefficient assignment
+bem3
+
+bayes_q6 <- kable(bem3$contrasts, 
+      digits = 2,
+      caption = "Bayesian Custom Contrast")
+
+bayes_q6
+```
+The conditional effect of “source” within the “strong argument” stratum has a credible interval of (-0.65, 0.67). The conditional effect of “source” within the “weak argument” stratum has a confidence interval of (-1, 0.32). The estimated difference between the two conditional effects (strong - weak) is $0.01 - (-0.34) = 0.35$. 
+
+# Question 7 
+Compute an equivalence test (using both a frequentist approach that yields a p-value,and a Bayesian approach that yields a Bayes Factor) to answer the question whether the null hypothesis of non-equivalence can be rejected (or in the Bayesian domain whether the hypothesis of equivalence can be supported when compared to a diffuse alternative) for the following contrast and null-region: is the difference between an attractive source and an expert source when presented with a weak argument, and averaged over high and low self-monitors equivalent when considering a practical region of equivalence that stretches from -.4 to .4 and is centered around 0. For the Bayesian analysis please use the bayesfactor_parameters() function as outlined in the codebook.For all priors, always use a normal distribution centered on 0 with standard deviation of 3. 
+
+## 7.1 Frequentist Equivalence Test
+
+```{r}
+em2 <- emmeans(lm1, specs = c("argument", "monitors", "source"))
+em2
+
+# Difference between an attractive source and an expert source when presented with a weak argument, and averaged over high and low self-monitors 
+lm1_eqv <- summary((emmeans(lm1,c("argument","monitors","source"),
+                            contr=list(c1 = c(0, 0.5, 0, 0.5, 0, -0.5, 0, -0.5)),
+                            side = "equivalence",
+                            null = 0,
+                            delta = .4)$contrasts),
+                    infer=TRUE)
+
+
+freq_q7 <- kable(lm1_eqv, 
+      digits = c(0, 2, 2, 0, 2, 2, 2, 3),
+      caption = "Frequentist Equivalence Test")
+
+freq_q7
+```
+**Interpretation:** With a p-value of 0.42, we fail to reject the null hypothesis of non-equivalence. Given the 95% interval, the region of difference is (-0.99, 0.32). The upper bound (0.32) lies in the equivalence interval (-0.4,0.4) but the lower bound (-0.99) is outside of the equivalence interval. Therefore, we cannot conclude equivalence between an attractive source and an expert source when presented with a weak argument, and averaged over high and low self-monitors.
+
+## 7.2 Bayesian Equivalence Test
+```{r cache=TRUE, results="hide", message=FALSE, warnings=FALSE}
+set.seed(5750)
+blm3_eqv <- bayesfactor_parameters((emmeans(blm3,c("argument","monitors","source"),
+                                    contr=list(c1 = c(0, 0.5, 0, 0.5, 
+                                                      0, -0.5, 0, -0.5)))$contrasts),
+                                    prior = blm3,
+                                    null = c(-0.4,0.4))
+```
+```{r}
+blm3_eqv
+```
+**Interpretation:** When compared to a diffuse alternative, the Bayes Factor of 0.017 (reciprocal 58.8) indicates that there is strong evidence in favor of the alternative hypothesis ($H_A$: the true difference lies outside of the equivalence region) against the null hypothesis of equivalence. The data strongly supports that the difference is outside of the range of (-0.4, 0.4),making it non-equivalent
+
+**Corrected Interpretation:** The Bayesian analysis strongly favors the equivalence hypothesis over an alternative with a diffuse prior. The BF is .017 (log scale -4.11), in favor of the null. THe inverse of this BF is about 59 and thus the support for the equivalence hypothesis quite strong.
+
+BF is much less than 1, alternative / null, less than 1 means there is more evidence for null. The null hypothesis (equivalence): the difference is not meaningfully different from 0, within the range of [-0.4, 0.4].
+
+# Question 8 
+ Consider a design that has three independent variables. Consider further that one of the two-way interactions is significant. Why can it be misleading to simply report this two-way interaction, without mentioning the three-way interaction? Expected length is about 1 paragraph.
+
+ **Answer**: Reporting only a significant two-way interaction in a design with three independent variables without considering the potential three-way interaction can be misleading because the nature and strength of the two-way interaction might change based on the level of the third variable. If the three-way interaction is significant, it means the two-way interaction is conditional upon the third variable's value. Thus, by neglecting to address the three-way interaction, one risks oversimplifying the relationships and may misinform or mislead readers about the true dynamics among the variables. (referenced ChatGPT)
+
+# Question 9
+Fractional factorials that include many factors can sometimes have a surprisingly low number of experimental conditions that need to be run. A design with 15 factors (all of them two levels) in a full factorial approach would need 32,768 combinations, requiring tens of thousand of subjects. However one may run a 1/2048 fraction of the design with just 16 conditions! This efficiency gain, however comes with a trade-off. What additional assumptions are necessary to interpret the result of fractional designs? Note: you do not have to derive the aliasing structure for this specific example, but simply comment in general about the trade-off in fractional factorials. Expected length is about 1 paragraph.
+
+ **Answer**: The additional assumptions made in fractional factorial designs are:
+
+1. **Sparsity-of-Effects Principle:** This is the belief that higher-order interactions (like three-way interactions or more) are often negligible or don't have much impact. So, researchers might focus mainly on the individual effects of factors and simpler interactions between them.
+   
+2. **Aliasing:** This is when certain effects or interactions get mixed up with others, making it hard to pinpoint exactly which factor or interaction is causing a particular result. 
+
+These assumptions help in simplifying the design and reducing the number of experiments, but they might lead to challenges in fully understanding or interpreting the results. (referenced ChatGPT)
+
+# Question 10
+Consider the following experiment in which a campaign to increase political awareness about a topic was offered to a group of participants or not (treatment T = 0 or T = 1). These participants identified either as republican, democrat, or independent (P = party affiliation in the table below). The outcome of interest is some measure of awareness about the topic. Imagine further that we are able to observe the potential outcomes of all participants. The potential outcomes are shown in the table below.
+
+|P |Y_0 | Y_1|N(T = 0)|N(T = 1)|
+|:-|:---|---:|-------:|-------:|
+|D |1.0 | 1.5|     212|     266|
+|R |0.9 | 1.3|     209|     201|
+|I |0.9 | 0.1|      22|      90|
+
+The table also includes a sample size for each group, split by treatment and control. As an example, there were 212 democrats in the control condition (T=0). Finally, consider as a simplifying assumption that all individuals in the same cell have the same potential outcomes. That means that as an example, the 212 democrats in the control condition all had an observed outcome of 1.0.
+
+```{r}
+party <- factor(c(rep("D",212+266),rep("R",209+201),rep("I",22+90)))
+y0 <- c(rep(1.0,212+266),rep(0.9,209+201),rep(0.9,22+90))
+y1 <- c(rep(1.5,212+266),rep(1.3,209+201),rep(0.1,22+90))
+treat <- c(rep(0,212),rep(1,266),rep(0,209),rep(1,201),rep(0,22),rep(1,90))
+yobs <- ifelse(treat == 0,y0,y1)
+df1 <- tibble(party,y0,y1,treat,yobs)
+```
+
+1. Using this table, first compute the average treatment effect (ATE) based on the potential outcomes. Do not split the ATE by subgroups, but only compute it across the full sample.
+
+**Corrected Answer**: ATE based on otential outcomes includes the unobservable counter factuals. Therefore, we compute both N(T = 1) and N(T = 0) with Y_1. We also compute both N(T = 1) and N(T = 0) with Y_0.
+
+- $Y_1avg = \frac{1.5\times(212+266) + 1.3\times(209+201) + 0.1\times(22+90)}{212+266+209+201+22+90}\approx 1.2612$ 
+
+- $Y_0avg = \frac{1\times(212+266) + 0.9\times(209+201) + 0.9\times(22+90)}{212+266+209+201+22+90}\approx 0.9478$
+
+- $Y_1avg - Y_0avg\approx 0.313$ 
+
+Code:
+```{r}
+#true ATE
+ATE <- mean(y1 - y0)
+# y1 - y0  gives a vector representing the individual treatment effects for each participant
+# mean() computes the average of these differences across all individuals
+ATE
+```
+
+2. Then, compute an (unadjusted) prima-facie treatment effect of the treatment variable.
+
+**Corrected Answer**: prima-facie effect does not include the unobservable counter factuals, so we only compute for N(T = 1) with Y_1 and N(T = 0) with Y_0.
+
+- $Y_1pf = \frac{1.5\times 266 + 1.3\times 201 + 0.1\times 90}{266+201+90}\approx 1.2016$
+- $Y_0pf = \frac{1\times 212 + 0.9\times 209 + 0.9\times 22}{212+209+22}\approx 0.9479$
+- $Y_1pf - Y_0pf \approx 0.254$
+
+Code:
+```{r}
+#prima facie (unadjusted)
+PTE <- lm(yobs ~ treat)
+# estimate the average difference in yobs between the treatment and control groups
+PTE
+```
+
+3. Then, compute the main effect of treatment using unweighted marginal means (Type III SS). 
+
+**Corrected Answer**: In this case, when we say unweighted, it means they are unweighted across D, P, I three groups (means that we assume they are the same number in population)
+
+- Main effect (unweighted): $\frac{(1.5-1.0)+(1.3-0.9)+(0.1-0.9)}{3}\approx 0.0333$
+
+```{r}
+#main effect Type III SS
+Unweighted_MM <- emmeans(lm(yobs ~ treat * party), ~ treat, 
+                         contr = "revpairwise", weights = "equal")
+#unweighted marginal means
+Unweighted_MM
+```
+
+4. Finally, compute the main effect of treatment using sample-size weighted marginal means (“proportional weighting”).
+
+**Corrected Answer**: In this case, we weight the marginal means of each group by the population in the sample. 
+
+- $n = 212+266+209+201+22+90 = 1000$
+- Main effect (weighted): $(1.5 - 1)\times \frac{212+266}{1000} + (1.3 - 0.9)\times \frac{209+201}{1000} + (0.1-0.9)\times \frac{22+90}{1000} \approx 0.313$
+
+```{r}
+#marginal sample-size weighted effect
+Weighted_MM <- emmeans(lm(yobs ~ treat * party), ~ treat, 
+                       contr = "revpairwise", 
+                       weights = "proportional")
+Weighted_MM
+```
+
+Please show your work briefly, report all results in a table, and interpret the four numbers that you calculated above. Include some discussion on how this relates to unbalanced designs. Expected length for the writing portion is about 1-2 paragraphs.
+
+**Corrected Interpretation:** Outcome for 1 & 4 are similar as both methods are taking into account the distribution of different groups within the sample to calculate an overall average effect of the treatment, leading to similar results.
+
